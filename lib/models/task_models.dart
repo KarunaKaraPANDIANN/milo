@@ -64,6 +64,86 @@ class Task {
     this.isPinned = false,
   });
 
+  /// Calculates the estimated end date based on the current progress and increment value
+  DateTime get estimatedEndDate {
+    final remainingValue = targetValue - startingValue;
+    final totalIncrements = (remainingValue / incrementValue).ceil();
+    
+    if (incrementFrequency == null || incrementUnit == null) {
+      return DateTime.now();
+    }
+    
+    Duration incrementDuration;
+    switch (incrementUnit) {
+      case TimeUnit.days:
+        incrementDuration = Duration(days: incrementFrequency!);
+        break;
+      case TimeUnit.weeks:
+        incrementDuration = Duration(days: incrementFrequency! * 7);
+        break;
+      case TimeUnit.months:
+        // Approximate month as 30 days for simplicity
+        incrementDuration = Duration(days: incrementFrequency! * 30);
+        break;
+      case TimeUnit.years:
+        // Approximate year as 365 days for simplicity
+        incrementDuration = Duration(days: incrementFrequency! * 365);
+        break;
+      default:
+        incrementDuration = Duration(days: incrementFrequency!);
+    }
+    
+    return createdAt.add(incrementDuration * totalIncrements);
+  }
+  
+  /// Returns the number of days remaining until the estimated end date
+  int get daysRemaining {
+    final now = DateTime.now();
+    final end = estimatedEndDate;
+    return end.isAfter(now) ? end.difference(now).inDays : 0;
+  }
+  
+  /// Returns the progress percentage (0-100)
+  double get progressPercentage {
+    if (targetValue <= startingValue) return 100.0;
+    return ((currentValue - startingValue) / (targetValue - startingValue) * 100).clamp(0.0, 100.0);
+  }
+  
+  /// Returns the expected value based on the current date and increment schedule
+  double get expectedValue {
+    if (incrementFrequency == null || incrementUnit == null) {
+      return startingValue;
+    }
+    
+    final now = DateTime.now();
+    final daysSinceCreation = now.difference(createdAt).inDays;
+    
+    double incrementMultiplier;
+    switch (incrementUnit) {
+      case TimeUnit.days:
+        incrementMultiplier = daysSinceCreation / (incrementFrequency!);
+        break;
+      case TimeUnit.weeks:
+        incrementMultiplier = daysSinceCreation / (incrementFrequency! * 7);
+        break;
+      case TimeUnit.months:
+        incrementMultiplier = daysSinceCreation / (incrementFrequency! * 30);
+        break;
+      case TimeUnit.years:
+        incrementMultiplier = daysSinceCreation / (incrementFrequency! * 365);
+        break;
+      default:
+        incrementMultiplier = 0;
+    }
+    
+    return (startingValue + (incrementValue * incrementMultiplier)).clamp(startingValue, targetValue);
+  }
+  
+  /// Returns the number of days since the task was created
+  int get daysSinceCreation {
+    return DateTime.now().difference(createdAt).inDays + 1; // +1 to count the current day
+  }
+
   Task copyWith({
     String? id,
     String? name,
@@ -82,6 +162,7 @@ class Task {
     List<TaskEntry>? entries,
     bool? notificationsEnabled,
     TimeOfDay? notificationTime,
+    bool? isPinned,
   }) {
     return Task(
       id: id ?? this.id,
@@ -97,10 +178,11 @@ class Task {
       incrementFrequency: incrementFrequency ?? this.incrementFrequency,
       incrementUnit: incrementUnit ?? this.incrementUnit,
       createdAt: createdAt ?? this.createdAt,
-      lastUpdated: lastUpdated ?? this.lastUpdated,
+      lastUpdated: lastUpdated ?? DateTime.now(),
       entries: entries ?? this.entries,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       notificationTime: notificationTime ?? this.notificationTime,
+      isPinned: isPinned ?? this.isPinned,
     );
   }
 

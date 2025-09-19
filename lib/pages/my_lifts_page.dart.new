@@ -32,14 +32,7 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
     setState(() => _isLoading = true);
     try {
       final tasks = await _taskService.getTasks();
-      print('Loaded ${tasks.length} tasks');
-      for (var task in tasks) {
-        print('Task: ${task.name}, Pinned: ${task.isPinned}');
-      }
-      setState(() {
-        _tasks = tasks;
-        print('Task list updated in state');
-      });
+      setState(() => _tasks = tasks);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -59,48 +52,10 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
 
   Future<void> _toggleTaskPin(Task task, bool isPinned) async {
     try {
-      print('Toggling pin for task ${task.id} to $isPinned');
-      
-      // Update local state immediately for better UX
-      setState(() {
-        final taskIndex = _tasks.indexWhere((t) => t.id == task.id);
-        if (taskIndex != -1) {
-          _tasks[taskIndex] = _tasks[taskIndex].copyWith(isPinned: isPinned);
-        }
-      });
-      
-      // Update in database
       final updatedTask = task.copyWith(isPinned: isPinned);
       await _taskService.updateTask(updatedTask);
-      
-      // Cancel notification if task is being unpinned
-      if (!isPinned) {
-        await _notificationService.cancelTaskNotification(task.id);
-      } else {
-        // Update notification if task is being pinned
-        await _notificationService.updateTaskNotification(updatedTask);
-      }
-      
-      // Show success feedback
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(isPinned ? 'Task pinned' : 'Task unpinned'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-      
+      await _refreshTasks();
     } catch (e) {
-      print('Error toggling pin: $e');
-      // Revert UI on error
-      setState(() {
-        final taskIndex = _tasks.indexWhere((t) => t.id == task.id);
-        if (taskIndex != -1) {
-          _tasks[taskIndex] = _tasks[taskIndex].copyWith(isPinned: !isPinned);
-        }
-      });
-      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to update task')),
@@ -111,11 +66,6 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
 
   Future<void> _setupPersistentNotification() async {
     await _notificationService.initialize();
-    // Clear any existing persistent notifications
-    await _notificationService.cancel(_persistentNotificationId);
-    
-    // No longer showing persistent notifications for pinned tasks
-    // as per user request
   }
 
   @override
@@ -139,7 +89,7 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
                   itemBuilder: (context, index) {
                     final task = _tasks[index];
                     return TaskCard(
-                      key: ValueKey('${task.id}_${task.isPinned}'), // Include isPinned in the key
+                      key: ValueKey(task.id),
                       task: task,
                       onTaskUpdated: _refreshTasks,
                       onLogProgress: () => _showLogProgressDialog(task),
@@ -216,10 +166,6 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
 
   Future<void> _deleteTask(Task task) async {
     try {
-      // Cancel any existing notifications for this task
-      await _notificationService.cancelTaskNotification(task.id);
-      
-      // Delete the task from the database
       await _taskService.deleteTask(task.id);
       await _refreshTasks();
       if (mounted) {
@@ -289,7 +235,6 @@ class TaskCard extends StatelessWidget {
                     color: task.isPinned ? theme.colorScheme.primary : null,
                   ),
                   onPressed: () => onPinToggled(!task.isPinned),
-                  tooltip: task.isPinned ? 'Unpin task' : 'Pin task',
                 ),
               ],
             ),

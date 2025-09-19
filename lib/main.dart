@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:timezone/data/latest.dart' as tz;
 import 'pages/set_load_page.dart';
 import 'pages/my_lifts_page.dart';
 import 'pages/about_page.dart';
@@ -8,12 +9,47 @@ import 'services/task_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Initialize timezone data first
+  tz.initializeTimeZones();
+  
   // Initialize services
-  await NotificationService().initialize();
-  await NotificationService().requestPermissions();
+  final notificationService = NotificationService();
+  await notificationService.initialize(
+    onNotificationTap: (payload) {
+      // Handle notification tap - payload contains the task ID
+      print('Notification tapped with payload: $payload');
+      // You can add navigation logic here if needed
+    },
+  );
+  await notificationService.requestPermissions();
+  
+  // Initialize tasks and clean up any orphaned notifications
   await TaskService.instance.initializeStream();
+  await _cleanUpOrphanedNotifications();
 
   runApp(const MyApp());
+}
+
+/// Cleans up notifications for tasks that no longer exist in the database
+Future<void> _cleanUpOrphanedNotifications() async {
+  try {
+    // Get all active notifications
+    final activeNotifications = await NotificationService().getActiveNotifications();
+    if (activeNotifications.isEmpty) return;
+    
+    // Get all task IDs from the database
+    final tasks = await TaskService.instance.getTasks();
+    final taskIds = tasks.map((task) => task.id).toSet();
+    
+    // Cancel notifications for tasks that don't exist anymore
+    for (final notification in activeNotifications) {
+      if (!taskIds.contains(notification.payload)) {
+        await NotificationService().cancel(notification.id);
+      }
+    }
+  } catch (e) {
+    print('Error cleaning up orphaned notifications: $e');
+  }
 }
 
 class MyApp extends StatelessWidget {

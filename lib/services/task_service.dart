@@ -119,6 +119,10 @@ class TaskService {
   }
 
   Future<void> clearAllTasks() async {
+    // First cancel all notifications
+    await NotificationService().cancelAllNotifications();
+    
+    // Then clear the tasks from storage
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tasksKey);
     _tasksController.add([]);
