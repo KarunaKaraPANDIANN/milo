@@ -62,15 +62,37 @@ class TaskService {
   }
 
   Future<void> updateTask(Task updatedTask) async {
-    final tasks = await getTasks();
-    final index = tasks.indexWhere((task) => task.id == updatedTask.id);
-    
-    if (index != -1) {
+    try {
+      print('Updating task: ${updatedTask.id} (${updatedTask.name})');
+      final tasks = await getTasks();
+      final taskId = updatedTask.id;
+      final index = tasks.indexWhere((task) => task.id == taskId);
+      
+      if (index == -1) {
+        print('Task not found: $taskId');
+        return;
+      }
+      
+      // Ensure we have a valid task ID
+      if (taskId.isEmpty) {
+        throw Exception('Cannot update task with empty ID');
+      }
+      
+      // Update the task
       tasks[index] = updatedTask;
       await saveTasks(tasks);
       
-      // Update notification
-      await NotificationService().updateTaskNotification(updatedTask);
+      // Update notification if needed
+      if (updatedTask.isPinned && updatedTask.notificationsEnabled) {
+        print('Updating notification for task: $taskId');
+        await NotificationService().updateTaskNotification(updatedTask);
+      } else {
+        print('Canceling notification for task: $taskId');
+        await NotificationService().cancelTaskNotification(taskId);
+      }
+    } catch (e) {
+      print('Error updating task: $e');
+      rethrow;
     }
   }
 

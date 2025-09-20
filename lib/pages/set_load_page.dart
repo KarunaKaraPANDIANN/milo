@@ -493,11 +493,12 @@ class CreateTaskBottomSheet extends StatefulWidget {
 }
 
 class _CreateTaskBottomSheetState extends State<CreateTaskBottomSheet> {
-  final _formKey = GlobalKey<FormState>();
+  final _formKey = GlobalKey<FormState>(debugLabel: 'createTaskForm');
   final _nameController = TextEditingController();
   final _currentValueController = TextEditingController();
   final _targetValueController = TextEditingController();
   final _incrementController = TextEditingController();
+  bool _isLoading = false;
   final _customUnitController = TextEditingController();
   final _frequencyController = TextEditingController();
 
@@ -541,6 +542,9 @@ class _CreateTaskBottomSheetState extends State<CreateTaskBottomSheet> {
       ),
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 16,
+        right: 16,
+        top: 16,
       ),
       child: DraggableScrollableSheet(
         initialChildSize: 0.9,
@@ -689,7 +693,11 @@ class _CreateTaskBottomSheetState extends State<CreateTaskBottomSheet> {
                             Expanded(
                               flex: 2,
                               child: ElevatedButton(
-                                onPressed: _createTask,
+                                onPressed: () {
+                                  if (_formKey.currentState!.validate()) {
+                                    _createTask();
+                                  }
+                                },
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor:
                                       widget.config.type == TaskType.timeBased
@@ -1356,7 +1364,10 @@ class _CreateTaskBottomSheetState extends State<CreateTaskBottomSheet> {
               dialHandColor: const Color(0xFF667EEA),
             ),
           ),
-          child: child!,
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+            child: child!,
+          ),
         );
       },
     );
@@ -1397,8 +1408,16 @@ class _CreateTaskBottomSheetState extends State<CreateTaskBottomSheet> {
     return _selectedUnit ?? '';
   }
 
-  void _createTask() {
-    if (_formKey.currentState!.validate()) {
+  Future<void> _createTask() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
       String taskName;
       if (_selectedTemplate != null && _selectedTemplate != 'custom') {
         taskName = _selectedTemplate!;
@@ -1407,13 +1426,15 @@ class _CreateTaskBottomSheetState extends State<CreateTaskBottomSheet> {
       }
 
       if (taskName.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Please select a template or enter a custom task name',
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Please select a template or enter a custom task name',
+              ),
             ),
-          ),
-        );
+          );
+        }
         return;
       }
 
@@ -1426,20 +1447,19 @@ class _CreateTaskBottomSheetState extends State<CreateTaskBottomSheet> {
           : double.parse(_currentValueController.text);
 
       final task = Task(
-        id: TaskService.instance.generateId(),
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
         name: taskName,
         type: widget.config.type,
         progressionType: widget.config.progressionType,
         unit: unit,
         startingValue: startingValue,
-        currentValue: startingValue, // Initially same as starting value
+        currentValue: startingValue,
         targetValue: widget.config.type == TaskType.timeBased
             ? _convertTimeToMinutes(_targetValueController.text)
             : double.parse(_targetValueController.text),
         incrementValue: widget.config.type == TaskType.timeBased
             ? _convertTimeToMinutes(_incrementController.text)
             : double.parse(_incrementController.text),
-        timerDuration: null, // Not used for time-based tasks anymore
         incrementFrequency: _frequencyController.text.isNotEmpty
             ? int.tryParse(_frequencyController.text)
             : null,
@@ -1452,8 +1472,25 @@ class _CreateTaskBottomSheetState extends State<CreateTaskBottomSheet> {
         notificationTime: _notificationsEnabled ? _notificationTime : null,
       );
 
+      // Close the bottom sheet first
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // Then call the callback
       widget.onTaskCreated(task);
-      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error creating task: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 

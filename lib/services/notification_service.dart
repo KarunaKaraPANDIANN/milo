@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
+import 'package:intl/intl.dart';
 import '../models/task_models.dart';
 
 class NotificationService {
@@ -8,23 +9,26 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
   bool _initialized = false;
   Function(String?)? _onNotificationTap;
 
   Future<void> initialize({Function(String?)? onNotificationTap}) async {
     if (_initialized) return;
-    
+
     _onNotificationTap = onNotificationTap;
 
     // Initialize notifications
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
-    
+
     const initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
@@ -39,28 +43,67 @@ class NotificationService {
         }
       },
     );
-    
+
     _initialized = true;
   }
 
-  Future<void> scheduleTaskNotification(Task task) async {
-    // Only schedule notifications for pinned tasks with notifications enabled
-    if (!task.notificationsEnabled || task.notificationTime == null || !task.isPinned) return;
+  // Generate a consistent notification ID for a task
+  int _getNotificationId(String taskId) {
+    try {
+      // Ensure we have a non-empty string
+      if (taskId.isEmpty) {
+        print('Warning: Empty task ID provided, using default ID');
+        return 0;
+      }
 
-    await initialize();
-    
-    // Check if we can schedule exact alarms (required for Android 12+)
-    final bool canScheduleExactAlarms = await _notifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestExactAlarmsPermission() ?? false;
-        
-    if (!canScheduleExactAlarms) {
-      print('Exact alarms permission not granted, scheduling with inexact timing');
+      // If the ID is a numeric string, parse it directly
+      if (RegExp(r'^\d+$').hasMatch(taskId)) {
+        final id = int.parse(taskId);
+        return id.abs() % 1000000;
+      }
+
+      // For non-numeric IDs, use the hash code
+      final hash = taskId.hashCode.abs();
+      final id = hash % 1000000;
+      print('Generated notification ID $id for task: $taskId');
+      return id;
+    } catch (e) {
+      print('Error generating notification ID for task $taskId: $e');
+      // Fallback to a simple hash if anything goes wrong
+      return taskId.hashCode.abs() % 1000000;
+    }
+  }
+
+  Future<void> scheduleTaskNotification(Task task) async {
+    // Only schedule notifications for pinned tasks
+    if (!task.isPinned) {
+      return;
     }
 
-    final notificationTime = task.notificationTime!;
+    print('Scheduling notification for task: ${task.name}');
+
+    await initialize();
+
+    // Check if we can schedule exact alarms (required for Android 12+)
+    final bool canScheduleExactAlarms =
+        await _notifications
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >()
+            ?.requestExactAlarmsPermission() ??
+        false;
+
+    if (!canScheduleExactAlarms) {
+      print(
+        'Exact alarms permission not granted, scheduling with inexact timing',
+      );
+    }
+
+    // Use the task's notification time or default to 9 AM
+    final notificationTime =
+        task.notificationTime ?? const TimeOfDay(hour: 9, minute: 0);
     final now = DateTime.now();
-    
+
     // Create the scheduled time for today
     var scheduledDate = DateTime(
       now.year,
@@ -114,15 +157,19 @@ class NotificationService {
       iOS: iosDetails,
     );
 
-    final body = _buildNotificationBody(task, daysSinceCreation, progressPercentage.toDouble());
+    final body = _buildNotificationBody(
+      task,
+      daysSinceCreation,
+      progressPercentage.toDouble(),
+    );
 
     try {
       // First cancel any existing notification for this task
-      await _notifications.cancel(task.id.hashCode);
-      
+      await _notifications.cancel(_getNotificationId(task.id));
+
       // Get the timezone location
       final location = tz.getLocation(tz.local.name);
-      
+
       // Create the first scheduled time
       var scheduledTz = tz.TZDateTime(
         location,
@@ -132,66 +179,93 @@ class NotificationService {
         scheduledDate.hour,
         scheduledDate.minute,
       );
-      
+
       // If the time has already passed today, schedule for the same time tomorrow
       final now = tz.TZDateTime.now(location);
       if (scheduledTz.isBefore(now)) {
         scheduledTz = scheduledTz.add(const Duration(days: 1));
       }
-      
-      print('Scheduling daily notification for ${task.name} at $scheduledTz (timezone: ${tz.local.name})');
-      
+
+      print(
+        'Scheduling daily notification for ${task.name} at $scheduledTz (timezone: ${tz.local.name})',
+      );
+
       // Schedule the notification to repeat daily
       await _notifications.zonedSchedule(
-        task.id.hashCode,
+        _getNotificationId(task.id),
         '🏋️ ${task.name} Progress Update',
         body,
         scheduledTz,
         notificationDetails,
-        androidScheduleMode: canScheduleExactAlarms 
+        androidScheduleMode: canScheduleExactAlarms
             ? AndroidScheduleMode.exactAllowWhileIdle
             : AndroidScheduleMode.inexactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time, // Repeat daily at this time
-        payload: task.id, // Store task ID in payload for handling notification taps
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents:
+            DateTimeComponents.time, // Repeat daily at this time
+        payload:
+            task.id, // Store task ID in payload for handling notification taps
       );
-      
+
+      print(
+        'Successfully scheduled notification for ${task.name} at ${scheduledTz.hour}:${scheduledTz.minute}',
+      );
+
       // Also schedule an immediate test notification to verify the system works
       await _notifications.show(
-        task.id.hashCode + 10000, // Different ID for test
+        _getNotificationId(task.id) + 10000, // Different ID for test
         '🏋️ SCHEDULED: ${task.name}',
-        'Task notification has been scheduled for ${notificationTime.hour.toString().padLeft(2, '0')}:${notificationTime.minute.toString().padLeft(2, '0')}. You will receive daily reminders at this time.',
+        '',
         notificationDetails,
       );
-      
-      print('Notification scheduled successfully for ${task.name} at ${scheduledTz}');
+
+      print(
+        'Notification scheduled successfully for ${task.name} at ${scheduledTz}',
+      );
     } catch (e) {
       print('Error scheduling notification: $e');
     }
   }
 
-  String _buildNotificationBody(Task task, int daysSinceCreation, double progressPercentage) {
-    final progressBar = '${'▰' * (progressPercentage ~/ 10)}${'▱' * (10 - (progressPercentage ~/ 10))}';
-    
+  String _buildNotificationBody(
+    Task task,
+    int daysSinceCreation,
+    double progressPercentage,
+  ) {
+    final progressBar =
+        '${'▰' * (progressPercentage ~/ 10)}${'▱' * (10 - (progressPercentage ~/ 10))}';
+
     final currentValue = task.currentValue;
     final expectedValue = task.expectedValue;
     final difference = currentValue - expectedValue;
-    final progressStatus = difference >= 0 
-        ? '✅ Ahead by ${difference.toStringAsFixed(1)}${task.unit ?? ''}'
-        : '⚠️ Behind by ${difference.abs().toStringAsFixed(1)}${task.unit ?? ''}';
-    
+
+    String progressStatus;
+    if (task.isDecrementing) {
+      if (currentValue <= task.targetValue) {
+        progressStatus = '🎉 Target reached! Keep it up!';
+      } else {
+        final remaining = currentValue - task.targetValue;
+        progressStatus =
+            '📉 ${remaining.toStringAsFixed(1)}${task.unit ?? ''} left to reach your goal';
+      }
+    } else {
+      progressStatus = difference >= 0
+          ? '✅ Ahead by ${difference.toStringAsFixed(1)}${task.unit ?? ''}'
+          : '⚠️ Behind by ${difference.abs().toStringAsFixed(1)}${task.unit ?? ''}';
+    }
+
     // Format dates
-    final startDate = '${task.createdAt.day}/${task.createdAt.month}/${task.createdAt.year}';
+    final startDate = DateFormat('MMM d, y').format(task.createdAt);
     final endDate = task.estimatedEndDate;
-    final formattedEndDate = '${endDate.day}/${endDate.month}/${endDate.year}';
-    
+    final formattedEndDate = DateFormat('MMM d, y').format(endDate);
+
     return '''
 📅 Day $daysSinceCreation • ${progressPercentage.toStringAsFixed(1)}%
 $progressBar
 
-Current: ${currentValue}${task.unit ?? ''}
-Expected: ${expectedValue.toStringAsFixed(1)}${task.unit ?? ''}
-Target: ${task.targetValue}${task.unit ?? ''}
+Current: ${currentValue.toStringAsFixed(1)}${task.unit ?? ''}
+${task.isDecrementing ? 'Starting' : 'Target'}: ${task.targetValue}${task.unit ?? ''}
 
 ⏳ Timeline: $startDate → $formattedEndDate
 ⏱️ ${task.daysRemaining} days remaining
@@ -201,28 +275,26 @@ $progressStatus
 Tap to update your progress!''';
   }
 
-
-
   Future<void> cancelTaskNotification(String taskId) async {
     try {
-      // Cancel the main task notification
-      await _notifications.cancel(taskId.hashCode);
-      
-      // Also cancel any immediate test notifications (they use taskId.hashCode + 10000)
-      await _notifications.cancel(taskId.hashCode + 10000);
-      
-      // And cancel any immediate task notifications (they use taskId.hashCode + 1000)
-      await _notifications.cancel(taskId.hashCode + 1000);
-      
+      final notificationId = _getNotificationId(taskId);
+      // Cancel all possible notification IDs for this task
+      await _notifications.cancel(notificationId);
+      await _notifications.cancel(notificationId + 10000);
+      await _notifications.cancel(notificationId + 1000);
       print('Canceled all notifications for task: $taskId');
     } catch (e) {
       print('Error canceling notifications for task $taskId: $e');
+      rethrow;
     }
   }
 
   Future<void> updateTaskNotification(Task task) async {
+    // Cancel any existing notifications for this task
     await cancelTaskNotification(task.id);
-    if (task.notificationsEnabled && task.isPinned) {
+
+    if (task.isPinned) {
+      // If the task has a specific notification time, use that
       await scheduleTaskNotification(task);
     }
   }
@@ -238,21 +310,28 @@ Tap to update your progress!''';
 
   Future<bool> requestPermissions() async {
     await initialize();
-    
-    final androidPlugin = _notifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
+    final androidPlugin = _notifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (androidPlugin != null) {
       return await androidPlugin.requestNotificationsPermission() ?? false;
     }
-    
-    final iosPlugin = _notifications.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+
+    final iosPlugin = _notifications
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >();
     if (iosPlugin != null) {
       return await iosPlugin.requestPermissions(
-        alert: true,
-        badge: true,
-        sound: true,
-      ) ?? false;
+            alert: true,
+            badge: true,
+            sound: true,
+          ) ??
+          false;
     }
-    
+
     return true;
   }
 
@@ -298,12 +377,7 @@ Tap to update your progress!''';
 
     const platformDetails = NotificationDetails(android: androidDetails);
 
-    await _notifications.show(
-      id,
-      title,
-      body,
-      platformDetails,
-    );
+    await _notifications.show(id, title, body, platformDetails);
   }
 
   /// Cancels a notification by ID
@@ -315,8 +389,10 @@ Tap to update your progress!''';
   Future<void> showImmediateTaskNotification(Task task) async {
     await initialize();
 
-    final daysSinceCreation = DateTime.now().difference(task.createdAt).inDays + 1;
-    final progressPercentage = ((task.currentValue / task.targetValue) * 100).clamp(0, 100);
+    final daysSinceCreation =
+        DateTime.now().difference(task.createdAt).inDays + 1;
+    final progressPercentage = ((task.currentValue / task.targetValue) * 100)
+        .clamp(0, 100);
 
     const androidDetails = AndroidNotificationDetails(
       'task_reminders',
@@ -341,7 +417,11 @@ Tap to update your progress!''';
       iOS: iosDetails,
     );
 
-    final body = _buildNotificationBody(task, daysSinceCreation, progressPercentage.toDouble());
+    final body = _buildNotificationBody(
+      task,
+      daysSinceCreation,
+      progressPercentage.toDouble(),
+    );
 
     await _notifications.show(
       task.id.hashCode + 1000, // Different ID for immediate notifications

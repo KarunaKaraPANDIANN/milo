@@ -64,14 +64,14 @@ class Task {
     this.isPinned = false,
   });
 
-  /// Calculates the estimated end date based on the current progress and increment value
+  /// Returns the estimated end date based on the increment frequency and target value
   DateTime get estimatedEndDate {
-    final remainingValue = targetValue - startingValue;
-    final totalIncrements = (remainingValue / incrementValue).ceil();
-    
     if (incrementFrequency == null || incrementUnit == null) {
-      return DateTime.now();
+      return createdAt.add(const Duration(days: 30)); // Default to 30 days if not specified
     }
+
+    // Calculate total increments needed (always use absolute difference for duration)
+    final totalIncrements = ((targetValue - startingValue).abs() / incrementValue).ceil();
     
     Duration incrementDuration;
     switch (incrementUnit) {
@@ -82,61 +82,69 @@ class Task {
         incrementDuration = Duration(days: incrementFrequency! * 7);
         break;
       case TimeUnit.months:
-        // Approximate month as 30 days for simplicity
         incrementDuration = Duration(days: incrementFrequency! * 30);
         break;
       case TimeUnit.years:
-        // Approximate year as 365 days for simplicity
         incrementDuration = Duration(days: incrementFrequency! * 365);
         break;
       default:
         incrementDuration = Duration(days: incrementFrequency!);
     }
     
+    // Always add positive duration to start date
     return createdAt.add(incrementDuration * totalIncrements);
   }
   
   /// Returns the number of days remaining until the estimated end date
+  /// Always returns a positive value or 0 if the end date has passed
   int get daysRemaining {
     final now = DateTime.now();
     final end = estimatedEndDate;
-    return end.isAfter(now) ? end.difference(now).inDays : 0;
+    final difference = end.difference(now);
+    // Return 0 if the end date has passed, otherwise return the number of days remaining
+    return difference.isNegative ? 0 : difference.inDays + 1; // +1 to count the current day
   }
   
+  /// Returns whether this is a decrementing task (target < starting value)
+  bool get isDecrementing => targetValue < startingValue;
+
   /// Returns the progress percentage (0-100)
   double get progressPercentage {
-    if (targetValue <= startingValue) return 100.0;
-    return ((currentValue - startingValue) / (targetValue - startingValue) * 100).clamp(0.0, 100.0);
+    if (isDecrementing) {
+      if (startingValue <= targetValue) return 100.0;
+      return ((startingValue - currentValue) / (startingValue - targetValue) * 100).clamp(0.0, 100.0);
+    } else {
+      if (targetValue <= startingValue) return 100.0;
+      return ((currentValue - startingValue) / (targetValue - startingValue) * 100).clamp(0.0, 100.0);
+    }
   }
   
   /// Returns the expected value based on the current date and increment schedule
   double get expectedValue {
     if (incrementFrequency == null || incrementUnit == null) {
-      return startingValue;
+      return isDecrementing ? startingValue : currentValue;
     }
     
     final now = DateTime.now();
-    final daysSinceCreation = now.difference(createdAt).inDays;
+    final totalDays = createdAt.difference(estimatedEndDate).inDays.abs();
+    final daysPassed = now.difference(createdAt).inDays;
     
-    double incrementMultiplier;
-    switch (incrementUnit) {
-      case TimeUnit.days:
-        incrementMultiplier = daysSinceCreation / (incrementFrequency!);
-        break;
-      case TimeUnit.weeks:
-        incrementMultiplier = daysSinceCreation / (incrementFrequency! * 7);
-        break;
-      case TimeUnit.months:
-        incrementMultiplier = daysSinceCreation / (incrementFrequency! * 30);
-        break;
-      case TimeUnit.years:
-        incrementMultiplier = daysSinceCreation / (incrementFrequency! * 365);
-        break;
-      default:
-        incrementMultiplier = 0;
+    if (totalDays <= 0 || daysPassed <= 0) {
+      return isDecrementing ? startingValue : startingValue;
     }
     
-    return (startingValue + (incrementValue * incrementMultiplier)).clamp(startingValue, targetValue);
+    // Calculate the progress as a fraction of total time
+    final progress = (daysPassed / totalDays).clamp(0.0, 1.0);
+    
+    if (isDecrementing) {
+      // For decrementing tasks, we go from startingValue down to targetValue
+      final totalDecrease = (startingValue - targetValue) * progress;
+      return (startingValue - totalDecrease).clamp(targetValue, startingValue);
+    } else {
+      // For incrementing tasks, we go from startingValue up to targetValue
+      final totalIncrease = (targetValue - startingValue) * progress;
+      return (startingValue + totalIncrease).clamp(startingValue, targetValue);
+    }
   }
   
   /// Returns the number of days since the task was created
@@ -230,7 +238,7 @@ class Task {
     }
 
     return Task(
-      id: json['id'],
+      id: json['id'].toString(), // Ensure ID is always a string
       name: json['name'],
       type: taskType,
       progressionType: progressionType,
@@ -409,7 +417,9 @@ class TaskTypeConfig {
         UnitOption(label: "L", description: "Liters"),
         UnitOption(label: "ml", description: "Milliliters"),
         UnitOption(label: "cal", description: "Calories"),
-        UnitOption(label: "USD", description: "US Dollars"),
+        UnitOption(label: "INR", description: "Indian Rupees"),
+        UnitOption(label: "qty", description: "Quantity"),
+        UnitOption(label: "count", description: "Count"),
       ],
     ),
   ];

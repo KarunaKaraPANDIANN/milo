@@ -57,9 +57,25 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
     await _loadTasks();
   }
 
+  int get _pinnedTaskCount => _tasks.where((task) => task.isPinned).length;
+
   Future<void> _toggleTaskPin(Task task, bool isPinned) async {
     try {
       print('Toggling pin for task ${task.id} to $isPinned');
+      
+      // Check if we're trying to pin a new task when already at max pins
+      if (isPinned && _pinnedTaskCount >= 3 && !task.isPinned) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('You can only pin up to 3 tasks at a time'),
+              duration: Duration(seconds: 2),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
       
       // Update local state immediately for better UX
       setState(() {
@@ -271,6 +287,16 @@ class TaskCard extends StatelessWidget {
     
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      color: task.isPinned 
+          ? theme.colorScheme.primary.withOpacity(0.05)
+          : null,
+      shape: RoundedRectangleBorder(
+        side: task.isPinned
+            ? BorderSide(color: theme.colorScheme.primary.withOpacity(0.2), width: 1.5)
+            : BorderSide.none,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      elevation: task.isPinned ? 4 : 2,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -278,15 +304,54 @@ class TaskCard extends StatelessWidget {
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  task.name,
-                  style: theme.textTheme.titleLarge,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.name,
+                        style: theme.textTheme.titleLarge,
+                      ),
+                      if (task.isDecrementing)
+                        Container(
+                          margin: const EdgeInsets.only(top: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red[50],
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.red[300]!),
+                          ),
+                          child: Text(
+                            'Decremental',
+                            style: TextStyle(
+                              color: Colors.red[700],
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
                 IconButton(
-                  icon: Icon(
-                    task.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                    color: task.isPinned ? theme.colorScheme.primary : null,
+                  icon: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: task.isPinned 
+                          ? theme.colorScheme.primary.withOpacity(0.1)
+                          : null,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      task.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                      color: task.isPinned ? theme.colorScheme.primary : null,
+                      size: 20,
+                    ),
                   ),
                   onPressed: () => onPinToggled(!task.isPinned),
                   tooltip: task.isPinned ? 'Unpin task' : 'Pin task',
@@ -309,8 +374,13 @@ class TaskCard extends StatelessWidget {
               children: [
                 Text('${task.progressPercentage.toStringAsFixed(0)}%'),
                 Text(
-                  '${task.currentValue.toStringAsFixed(1)} / ${task.targetValue.toStringAsFixed(1)} ${task.unit}',
-                  style: theme.textTheme.bodyMedium,
+                  task.isDecrementing
+                      ? '${task.currentValue.toStringAsFixed(1)} → ${task.targetValue.toStringAsFixed(1)} ${task.unit}'
+                      : '${task.currentValue.toStringAsFixed(1)} / ${task.targetValue.toStringAsFixed(1)} ${task.unit}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: task.isDecrementing ? Colors.red[700] : null,
+                    fontWeight: task.isDecrementing ? FontWeight.bold : null,
+                  ),
                 ),
               ],
             ),
@@ -339,7 +409,7 @@ class TaskCard extends StatelessWidget {
                   const Icon(Icons.notifications, size: 16),
                   const SizedBox(width: 4),
                   Text(
-                    'Reminder at ${task.notificationTime!.format(context)}',
+                    'Reminder at ${task.notificationTime!.hour.toString().padLeft(2, '0')}:${task.notificationTime!.minute.toString().padLeft(2, '0')}',
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
