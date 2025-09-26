@@ -337,6 +337,7 @@ class Task {
               .toList() ??
           [],
       notificationsEnabled: json['notificationsEnabled'] ?? false,
+      isPinned: json['isPinned'] ?? false,
       notificationTime: json['notificationTime'] != null
           ? TimeOfDay(
               hour: json['notificationTime']['hour'],
