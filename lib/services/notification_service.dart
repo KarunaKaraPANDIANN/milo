@@ -120,9 +120,12 @@ class NotificationService {
 
     print('Scheduling daily notification for ${task.name} at $scheduledDate');
 
-    // Calculate progress using the Task class methods
+    // Calculate progress based on expected value
     final daysSinceCreation = task.daysSinceCreation;
-    final progressPercentage = task.progressPercentage;
+    final expectedValue = task.expectedValue;
+    final progressPercentage = task.isDecrementing
+        ? ((task.startingValue - expectedValue) / (task.startingValue - task.targetValue) * 100).clamp(0, 100)
+        : ((expectedValue - task.startingValue) / (task.targetValue - task.startingValue) * 100).clamp(0, 100);
 
     final androidDetails = AndroidNotificationDetails(
       'task_reminders',
@@ -238,21 +241,31 @@ class NotificationService {
 
     final currentValue = task.currentValue;
     final expectedValue = task.expectedValue;
-    final difference = currentValue - expectedValue;
+
+    // Calculate progress based on expected value
+    final expectedProgress = task.isDecrementing
+        ? ((task.startingValue - expectedValue) / (task.startingValue - task.targetValue) * 100).clamp(0, 100)
+        : ((expectedValue - task.startingValue) / (task.targetValue - task.startingValue) * 100).clamp(0, 100);
 
     String progressStatus;
     if (task.isDecrementing) {
       if (currentValue <= task.targetValue) {
         progressStatus = '🎉 Target reached! Keep it up!';
+      } else if (currentValue <= expectedValue) {
+        progressStatus = '📊 On track - keep going!';
       } else {
         final remaining = currentValue - task.targetValue;
-        progressStatus =
-            '📉 ${remaining.toStringAsFixed(1)}${task.unit ?? ''} left to reach your goal';
+        progressStatus = '📉 ${remaining.toStringAsFixed(1)}${task.unit ?? ''} left';
       }
     } else {
-      progressStatus = difference >= 0
-          ? '✅ Ahead by ${difference.toStringAsFixed(1)}${task.unit ?? ''}'
-          : '⚠️ Behind by ${difference.abs().toStringAsFixed(1)}${task.unit ?? ''}';
+      if (currentValue >= task.targetValue) {
+        progressStatus = '🎉 Target reached! Amazing work!';
+      } else if (currentValue >= expectedValue) {
+        progressStatus = '📊 On track - keep pushing!';
+      } else {
+        final remaining = task.targetValue - currentValue;
+        progressStatus = '📈 ${remaining.toStringAsFixed(1)}${task.unit ?? ''} to go';
+      }
     }
 
     // Format dates
@@ -265,10 +278,11 @@ class NotificationService {
 $progressBar
 
 Current: ${currentValue.toStringAsFixed(1)}${task.unit ?? ''}
+Expected: ${expectedValue.toStringAsFixed(1)}${task.unit ?? ''}
 ${task.isDecrementing ? 'Starting' : 'Target'}: ${task.targetValue}${task.unit ?? ''}
 
 ⏳ Timeline: $startDate → $formattedEndDate
-⏱️ ${task.daysRemaining} days remaining
+⏱️ ${task.daysRemaining} days remaining • ${(expectedProgress / 100).toStringAsFixed(1)}x speed
 
 $progressStatus
 

@@ -108,42 +108,89 @@ class Task {
   /// Returns whether this is a decrementing task (target < starting value)
   bool get isDecrementing => targetValue < startingValue;
 
-  /// Returns the progress percentage (0-100)
+  /// Returns the progress percentage (0-100) from start to target value
+  /// This shows the actual progress based on current value relative to start and target values
   double get progressPercentage {
     if (isDecrementing) {
-      if (startingValue <= targetValue) return 100.0;
+      // For decrementing tasks (e.g., weight loss)
+      if (startingValue <= targetValue) return 100.0; // Already at or below target
+      if (currentValue <= targetValue) return 100.0;  // Reached target
+      if (currentValue >= startingValue) return 0.0;  // Not started yet
+      
+      // Calculate progress as percentage from start to target
       return ((startingValue - currentValue) / (startingValue - targetValue) * 100).clamp(0.0, 100.0);
     } else {
-      if (targetValue <= startingValue) return 100.0;
+      // For incrementing tasks (e.g., strength gain)
+      if (targetValue <= startingValue) return 100.0; // Already at or above target
+      if (currentValue >= targetValue) return 100.0;  // Reached target
+      if (currentValue <= startingValue) return 0.0;  // Not started yet
+      
+      // Calculate progress as percentage from start to target
       return ((currentValue - startingValue) / (targetValue - startingValue) * 100).clamp(0.0, 100.0);
     }
   }
   
   /// Returns the expected value based on the current date and increment schedule
   double get expectedValue {
+    // If no increment frequency is set, return the starting value
     if (incrementFrequency == null || incrementUnit == null) {
-      return isDecrementing ? startingValue : currentValue;
+      return startingValue;
     }
     
     final now = DateTime.now();
-    final totalDays = createdAt.difference(estimatedEndDate).inDays.abs();
+    
+    // Calculate total duration and elapsed time in days
+    final totalDays = estimatedEndDate.difference(createdAt).inDays;
     final daysPassed = now.difference(createdAt).inDays;
     
-    if (totalDays <= 0 || daysPassed <= 0) {
-      return isDecrementing ? startingValue : startingValue;
+    // If the task hasn't started yet, return the starting value
+    if (daysPassed <= 0) {
+      return startingValue;
     }
     
-    // Calculate the progress as a fraction of total time
-    final progress = (daysPassed / totalDays).clamp(0.0, 1.0);
+    // If the end date has passed, return the target value
+    if (daysPassed >= totalDays) {
+      return targetValue;
+    }
     
+    // Calculate the number of increments that should have happened by now
+    final incrementsPerDay = incrementUnit == TimeUnit.days 
+        ? 1.0 / incrementFrequency! 
+        : incrementUnit == TimeUnit.weeks 
+            ? 1.0 / (7 * incrementFrequency!)
+            : 1.0 / (30 * incrementFrequency!);
+    
+    final totalIncrements = totalDays * incrementsPerDay;
+    final incrementsSoFar = daysPassed * incrementsPerDay;
+    
+    // Calculate the expected value based on increments
+    double expectedValue;
     if (isDecrementing) {
-      // For decrementing tasks, we go from startingValue down to targetValue
-      final totalDecrease = (startingValue - targetValue) * progress;
-      return (startingValue - totalDecrease).clamp(targetValue, startingValue);
+      // For decrementing tasks (e.g., weight loss)
+      final totalDecrease = startingValue - targetValue;
+      final decreasePerIncrement = totalDecrease / totalIncrements;
+      expectedValue = startingValue - (decreasePerIncrement * incrementsSoFar);
+      
+      print('Decrementing task: $name');
+      print('Days passed: $daysPassed of $totalDays');
+      print('Increments: $incrementsSoFar of $totalIncrements');
+      print('Starting: $startingValue, Target: $targetValue');
+      print('Expected value: $expectedValue');
+      
+      return expectedValue.clamp(targetValue, startingValue);
     } else {
-      // For incrementing tasks, we go from startingValue up to targetValue
-      final totalIncrease = (targetValue - startingValue) * progress;
-      return (startingValue + totalIncrease).clamp(startingValue, targetValue);
+      // For incrementing tasks (e.g., strength gain)
+      final totalIncrease = targetValue - startingValue;
+      final increasePerIncrement = totalIncrease / totalIncrements;
+      expectedValue = startingValue + (increasePerIncrement * incrementsSoFar);
+      
+      print('Incrementing task: $name');
+      print('Days passed: $daysPassed of $totalDays');
+      print('Increments: $incrementsSoFar of $totalIncrements');
+      print('Starting: $startingValue, Target: $targetValue');
+      print('Expected value: $expectedValue');
+      
+      return expectedValue.clamp(startingValue, targetValue);
     }
   }
   

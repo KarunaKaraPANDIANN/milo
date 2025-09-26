@@ -1,10 +1,23 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../models/task_models.dart';
 import '../services/task_service.dart';
 import '../services/notification_service.dart';
-import '../widgets/milo_logo.dart';
+
+// Simple observer for app lifecycle changes
+class AppLifecycleObserver extends WidgetsBindingObserver {
+  final VoidCallback onResume;
+  
+  AppLifecycleObserver({required this.onResume});
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      onResume();
+    }
+  }
+}
 
 class MyLiftsPage extends StatefulWidget {
   const MyLiftsPage({super.key});
@@ -20,12 +33,48 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
   bool _isLoading = true;
   static const int _persistentNotificationId = 1000;
 
+  Timer? _refreshTimer;
+
+  // Track the last time we refreshed tasks
+  DateTime? _lastRefreshTime;
+  late final AppLifecycleObserver _appLifecycleObserver;
+  
   @override
   void initState() {
     super.initState();
+    
+    // Initialize the lifecycle observer
+    _appLifecycleObserver = AppLifecycleObserver(
+      onResume: () {
+        // Only refresh if it's been more than 5 minutes since last refresh
+        if (_lastRefreshTime == null || 
+            DateTime.now().difference(_lastRefreshTime!) > const Duration(minutes: 5)) {
+          _refreshTasks();
+        }
+      },
+    );
+    
+    // Add lifecycle observer
+    WidgetsBinding.instance.addObserver(_appLifecycleObserver);
+    
+    // Initial load
     _loadTasks();
     _notificationService.initialize();
     _setupPersistentNotification();
+    
+    // Refresh tasks every minute to update progress
+    _refreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+      if (mounted) {
+        _refreshTasks();
+      }
+    });
+  }
+  
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(_appLifecycleObserver);
+    super.dispose();
   }
 
   Future<void> _loadTasks() async {
@@ -33,12 +82,44 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
     try {
       final tasks = await _taskService.getTasks();
       print('Loaded ${tasks.length} tasks');
+      
+      final updatedTasks = <Task>[];
+      final now = DateTime.now();
+      
       for (var task in tasks) {
         print('Task: ${task.name}, Pinned: ${task.isPinned}');
+        
+        // Calculate the expected value based on time elapsed
+        final expectedValue = task.expectedValue;
+        
+        // For each task, update the current value to match expected progress
+        final updatedTask = task.copyWith(
+          lastUpdated: now,
+          currentValue: expectedValue, // Update current value to match expected progress
+        );
+        
+        // Log the current state of the task
+        print('Type: ${task.progressionType} (${task.isDecrementing ? 'Decrementing' : 'Incrementing'})');
+        print('Starting Value: ${task.startingValue}');
+        print('Current Value: ${task.currentValue} -> ${updatedTask.currentValue}');
+        print('Expected Value: $expectedValue');
+        print('Target Value: ${task.targetValue}');
+        print('Progress: ${task.progressPercentage.toStringAsFixed(2)}% -> ${updatedTask.progressPercentage.toStringAsFixed(2)}%');
+        print('Days since creation: ${task.daysSinceCreation}');
+        print('---');
+        
+        updatedTasks.add(updatedTask);
       }
+      
+      // Save the updated tasks
+      if (updatedTasks.isNotEmpty) {
+        await _taskService.saveTasks(updatedTasks);
+      }
+      
       setState(() {
-        _tasks = tasks;
-        print('Task list updated in state');
+        _tasks = updatedTasks; // Use the updated tasks with recalculated values
+        _lastRefreshTime = now;
+        print('Task list updated in state at ${_lastRefreshTime}');
       });
     } catch (e) {
       if (mounted) {
@@ -54,7 +135,73 @@ class _MyLiftsPageState extends State<MyLiftsPage> {
   }
 
   Future<void> _refreshTasks() async {
-    await _loadTasks();
+    if (!mounted) return;
+    
+    try {
+      final tasks = await _taskService.getTasks();
+      final now = DateTime.now();
+      
+      final updatedTasks = <Task>[];
+      bool hasChanges = false;
+      
+      for (var task in tasks) {
+        // Calculate the expected value based on time elapsed
+        final expectedValue = task.expectedValue;
+        
+        // Only update if the expected value is different from current value
+        final shouldUpdate = task.isDecrementing 
+            ? expectedValue < task.currentValue
+            : expectedValue > task.currentValue;
+        
+        // If no update is needed, keep the existing task
+        if (!shouldUpdate) {
+          updatedTasks.add(task);
+          continue;
+        }
+        
+        // Update the task with the new current value
+        final updatedTask = task.copyWith(
+          lastUpdated: now,
+          currentValue: expectedValue,
+        );
+        
+        // Log the update
+        print('Updating task: ${task.name}');
+        print('Type: ${task.progressionType} (${task.isDecrementing ? 'Decrementing' : 'Incrementing'})');
+        print('Starting Value: ${task.startingValue}');
+        print('Current Value: ${task.currentValue} -> ${updatedTask.currentValue}');
+        print('Expected Value: $expectedValue');
+        print('Target Value: ${task.targetValue}');
+        print('Progress: ${task.progressPercentage.toStringAsFixed(2)}% -> ${updatedTask.progressPercentage.toStringAsFixed(2)}%');
+        print('---');
+        
+        updatedTasks.add(updatedTask);
+        hasChanges = true;
+      }
+      
+      // Only save if there are actual changes
+      if (hasChanges && updatedTasks.isNotEmpty) {
+        await _taskService.saveTasks(updatedTasks);
+      }
+      
+      if (mounted) {
+        setState(() {
+          _tasks = updatedTasks;
+          _lastRefreshTime = now;
+          print('Tasks refreshed at ${_lastRefreshTime}');
+        });
+      }
+    } catch (e) {
+      print('Error refreshing tasks: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to refresh tasks. Pull down to retry.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   int get _pinnedTaskCount => _tasks.where((task) => task.isPinned).length;
