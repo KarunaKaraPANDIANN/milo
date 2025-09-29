@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.milo"
+    namespace = "io.github.karunakarapandiann.milo"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

@@ -1,4 +1,4 @@
-package com.example.milo
+package io.github.karunakarapandiann.milo
 
 import io.flutter.embedding.android.FlutterActivity
 
