@@ -1,0 +1,13 @@
+  Progressive Overload app to help you increase your workout intensity gradually over days. The app supports the following preferences:
+  Set starting weights, reps, or durations for each exercise.
+  Customize daily increments for weight, reps, or workout duration.
+  Track your progress with detailed logs and charts.
+  Set workout frequency and rest days to match your training plan.
+  Other features:
+  Visual progress tracking to keep motivation high.
+  Simple and clean interface for easy daily use.
+  Export your workout data for backup or sharing.
+  Three main workout modes:
+  Strength training (weight-based increments)
+  Endurance training (reps or time-based increments)
+  Custom workouts tailored to your goals
