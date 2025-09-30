@@ -1,0 +1,9 @@
+default_platform(:android)
+
+platform :android do
+  desc "Deploy to F-Droid"
+  lane :deploy do
+    # This is just a placeholder lane
+    UI.message("Deploy lane for F-Droid metadata")
+  end
+end
