@@ -1,0 +1,11 @@
+Initial release of Milo - Progressive Overload Workout Tracker
+
+Features:
+- Set starting weights, reps, or durations for each exercise
+- Customize daily increments for weight, reps, or workout duration
+- Track your progress with detailed logs and charts
+- Set workout frequency and rest days
+- Visual progress tracking
+- Simple and clean interface
+- Export workout data for backup or sharing
+- Three workout modes: Strength, Endurance, and Custom
