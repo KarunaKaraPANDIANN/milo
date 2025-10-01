@@ -1,1 +1,1 @@
- Progressive Overload app to help you increase your workout intensity gradually over days
+Track and improve workouts using progressive overload methods.
