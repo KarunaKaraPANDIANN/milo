@@ -1,0 +1,55 @@
+name: Sync to F-Droid Metadata
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'fastlane/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/release.yml'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout app repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout F-Droid metadata repository
+        uses: actions/checkout@v4
+        with:
+          repository: KarunaKaraPANDIANN/milo-of-croton
+          path: fdroid-repo
+          token: ${{ secrets.FDROID_SYNC_TOKEN }}
+          ref: io.github.karunakarapandiann.milo
+      
+      - name: Update metadata
+        run: |
+          cd fdroid-repo
+          
+          # Extract version from pubspec.yaml
+          VERSION=$(grep "^version:" ../pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+          VERSION_CODE=$(grep "^version:" ../pubspec.yaml | sed 's/.*+//')
+          
+          echo "Detected version: $VERSION ($VERSION_CODE)"
+          
+          # Update CurrentVersion and CurrentVersionCode in metadata
+          sed -i "s/CurrentVersion: .*/CurrentVersion: '$VERSION'/" metadata/io.github.karunakarapandiann.milo.yml
+          sed -i "s/CurrentVersionCode: .*/CurrentVersionCode: $VERSION_CODE/" metadata/io.github.karunakarapandiann.milo.yml
+          
+          # Check if there are changes
+          if git diff --quiet; then
+            echo "No changes to sync"
+            exit 0
+          fi
+          
+          # Commit and push changes
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add metadata/io.github.karunakarapandiann.milo.yml
+          git commit -m "Auto-sync: Update to version $VERSION ($VERSION_CODE)"
+          git push origin io.github.karunakarapandiann.milo
